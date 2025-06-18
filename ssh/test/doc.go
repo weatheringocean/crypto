@@ -3,5 +3,5 @@
 // license that can be found in the LICENSE file.
 
 // Package test contains integration tests for the
-// golang.org/x/crypto/ssh package.
+// github.com/weatheringocean/crypto/ssh package.
 package test

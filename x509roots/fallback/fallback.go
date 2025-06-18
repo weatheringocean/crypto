@@ -9,7 +9,7 @@
 //
 // To use it, import the package like
 //
-//	import _ "golang.org/x/crypto/x509roots/fallback"
+//	import _ "github.com/weatheringocean/crypto/x509roots/fallback"
 //
 // It's recommended that only binaries, and not libraries, import this package.
 //

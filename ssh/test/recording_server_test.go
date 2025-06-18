@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/internal/testenv"
-	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/testdata"
+	"github.com/weatheringocean/crypto/internal/testenv"
+	"github.com/weatheringocean/crypto/ssh"
+	"github.com/weatheringocean/crypto/ssh/testdata"
 )
 
 type serverTest struct {

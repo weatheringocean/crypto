@@ -16,7 +16,7 @@ import (
 	"runtime"
 	"slices"
 
-	"golang.org/x/crypto/curve25519"
+	"github.com/weatheringocean/crypto/curve25519"
 )
 
 func init() {

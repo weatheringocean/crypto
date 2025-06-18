@@ -1,4 +1,4 @@
-module golang.org/x/crypto
+module github.com/weatheringocean/crypto
 
 go 1.23.0
 
