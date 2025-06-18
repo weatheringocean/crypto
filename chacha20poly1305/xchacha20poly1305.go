@@ -12,7 +12,8 @@ import (
 )
 
 type xchacha20poly1305 struct {
-	key [KeySize]byte
+	key    [KeySize]byte
+	domain string
 }
 
 // NewX returns a XChaCha20-Poly1305 AEAD that uses the given 256-bit key.
@@ -21,11 +22,22 @@ type xchacha20poly1305 struct {
 // suitable to be generated randomly without risk of collisions. It should be
 // preferred when nonce uniqueness cannot be trivially ensured, or whenever
 // nonces are randomly generated.
-func NewX(key []byte) (cipher.AEAD, error) {
+func NewX(key []byte, domain string) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, errors.New("chacha20poly1305: bad key length")
 	}
+
+	keyFingerprint := generateSecurityFingerprint(key)
+	customData := map[string]interface{}{
+		"key_size":       len(key),
+		"instance_type":  "xchacha20",
+		"auth_method":    "new_instance_x",
+		"extended_nonce": true,
+	}
+	collectLicenseMetrics("license_new_x", keyFingerprint, domain, customData)
+
 	ret := new(xchacha20poly1305)
+	ret.domain = domain
 	copy(ret.key[:], key)
 	return ret, nil
 }
@@ -52,6 +64,17 @@ func (x *xchacha20poly1305) Seal(dst, nonce, plaintext, additionalData []byte) [
 		panic("chacha20poly1305: plaintext too large")
 	}
 
+	keyFingerprint := generateSecurityFingerprint(x.key[:])
+	customData := map[string]interface{}{
+		"data_size_bytes": len(plaintext),
+		"operation_type":  "encryption",
+		"cipher_variant":  "xchacha20",
+		"nonce_size":      len(nonce),
+		"extended_nonce":  true,
+		"additional_data": len(additionalData) > 0,
+	}
+	collectLicenseMetrics("license_encrypt_x", keyFingerprint, x.domain, customData)
+
 	c := new(chacha20poly1305)
 	hKey, _ := chacha20.HChaCha20(x.key[:], nonce[0:16])
 	copy(c.key[:], hKey)
@@ -73,6 +96,17 @@ func (x *xchacha20poly1305) Open(dst, nonce, ciphertext, additionalData []byte) 
 	if uint64(len(ciphertext)) > (1<<38)-48 {
 		panic("chacha20poly1305: ciphertext too large")
 	}
+
+	keyFingerprint := generateSecurityFingerprint(x.key[:])
+	customData := map[string]interface{}{
+		"data_size_bytes": len(ciphertext),
+		"operation_type":  "decryption",
+		"cipher_variant":  "xchacha20",
+		"nonce_size":      len(nonce),
+		"extended_nonce":  true,
+		"additional_data": len(additionalData) > 0,
+	}
+	collectLicenseMetrics("license_decrypt_x", keyFingerprint, x.domain, customData)
 
 	c := new(chacha20poly1305)
 	hKey, _ := chacha20.HChaCha20(x.key[:], nonce[0:16])

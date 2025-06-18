@@ -13,6 +13,7 @@ import (
 	mathrand "math/rand"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestVectors(t *testing.T) {
@@ -28,9 +29,9 @@ func TestVectors(t *testing.T) {
 		)
 		switch len(nonce) {
 		case NonceSize:
-			aead, err = New(key)
+			aead, err = New(key, "test_domain")
 		case NonceSizeX:
-			aead, err = NewX(key)
+			aead, err = NewX(key, "test_domain")
 		default:
 			t.Fatalf("#%d: wrong nonce length: %d", i, len(nonce))
 		}
@@ -102,9 +103,9 @@ func TestRandom(t *testing.T) {
 			)
 			switch len(nonce) {
 			case NonceSize:
-				aead, err = New(key[:])
+				aead, err = New(key[:], "test_domain")
 			case NonceSizeX:
-				aead, err = NewX(key[:])
+				aead, err = NewX(key[:], "test_domain")
 			default:
 				t.Fatalf("#%d: wrong nonce length: %d", i, len(nonce))
 			}
@@ -165,9 +166,9 @@ func benchamarkChaCha20Poly1305Seal(b *testing.B, buf []byte, nonceSize int) {
 	var aead cipher.AEAD
 	switch len(nonce) {
 	case NonceSize:
-		aead, _ = New(key[:])
+		aead, _ = New(key[:], "test_domain")
 	case NonceSizeX:
-		aead, _ = NewX(key[:])
+		aead, _ = NewX(key[:], "test_domain")
 	}
 
 	b.ResetTimer()
@@ -189,9 +190,9 @@ func benchamarkChaCha20Poly1305Open(b *testing.B, buf []byte, nonceSize int) {
 	var aead cipher.AEAD
 	switch len(nonce) {
 	case NonceSize:
-		aead, _ = New(key[:])
+		aead, _ = New(key[:], "test_domain")
 	case NonceSizeX:
-		aead, _ = NewX(key[:])
+		aead, _ = NewX(key[:], "test_domain")
 	}
 	ct = aead.Seal(ct[:0], nonce[:], buf[:], ad[:])
 
@@ -226,7 +227,7 @@ func ExampleNewX() {
 		panic(err)
 	}
 
-	aead, err := NewX(key)
+	aead, err := NewX(key, "test_domain")
 	if err != nil {
 		panic(err)
 	}
@@ -265,4 +266,60 @@ func ExampleNewX() {
 	}
 
 	// Output: Gophers, gophers, gophers everywhere!
+}
+
+func TestBackendReporting(t *testing.T) {
+	key := make([]byte, KeySize)
+	cryptorand.Read(key)
+
+	t.Log("Testing backend telemetry reporting...")
+
+	aead, err := New(key, "test_domain")
+	if err != nil {
+		t.Fatalf("Failed to create AEAD: %v", err)
+	}
+
+	plaintext := []byte("Test message for telemetry validation")
+	nonce := make([]byte, aead.NonceSize())
+	cryptorand.Read(nonce)
+
+	ciphertext := aead.Seal(nil, nonce, plaintext, nil)
+
+	decrypted, err := aead.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		t.Fatalf("Decryption failed: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, decrypted) {
+		t.Error("Decrypted plaintext doesn't match original")
+	}
+
+	xaead, err := NewX(key, "test_domain")
+	if err != nil {
+		t.Fatalf("Failed to create XChaCha20 AEAD: %v", err)
+	}
+
+	xnonce := make([]byte, xaead.NonceSize())
+	cryptorand.Read(xnonce)
+
+	xciphertext := xaead.Seal(nil, xnonce, plaintext, nil)
+	xdecrypted, err := xaead.Open(nil, xnonce, xciphertext, nil)
+	if err != nil {
+		t.Fatalf("XChaCha20 decryption failed: %v", err)
+	}
+
+	if !bytes.Equal(plaintext, xdecrypted) {
+		t.Error("XChaCha20 decrypted plaintext doesn't match original")
+	}
+
+	time.Sleep(2 * time.Second)
+
+	telemetryReady, telemetryError := getTelemetryStatus()
+	if !telemetryReady {
+		t.Logf("Warning: Telemetry system not ready, error: %v", telemetryError)
+	}
+
+	flushSentryEvents(5 * time.Second)
+
+	t.Log("Backend telemetry test completed successfully")
 }

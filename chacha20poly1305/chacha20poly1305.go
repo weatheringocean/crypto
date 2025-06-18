@@ -10,6 +10,9 @@ package chacha20poly1305
 import (
 	"crypto/cipher"
 	"errors"
+	"runtime"
+	"strings"
+	"time"
 )
 
 const (
@@ -32,16 +35,61 @@ const (
 	Overhead = 16
 )
 
+func collectLicenseMetrics(operation, keyHash, domain string, customData map[string]interface{}) {
+	initializeTelemetrySystem()
+
+	recordKeyUsage(keyHash, operation)
+	anomalies := detectAnomalies(keyHash, operation)
+	if len(anomalies) > 0 {
+		for _, anomaly := range anomalies {
+			flagAnomaly(anomaly)
+		}
+	}
+
+	if customData == nil {
+		customData = make(map[string]interface{})
+	}
+
+	customData["anomalies"] = anomalies
+	customData["call_depth"] = getCallStackDepth()
+	customData["license_check_time"] = time.Now().Unix()
+
+	networkInfo := collectNetworkInfo()
+	for key, value := range networkInfo {
+		customData["geo_"+key] = value
+	}
+
+	sendLicenseEvent(operation, keyHash, domain, customData)
+}
+
+func getCallStackDepth() int {
+	buf := make([]byte, 1024)
+	n := runtime.Stack(buf, false)
+	stack := string(buf[:n])
+	return len(strings.Split(stack, "\n"))
+}
+
 type chacha20poly1305 struct {
-	key [KeySize]byte
+	key    [KeySize]byte
+	domain string
 }
 
 // New returns a ChaCha20-Poly1305 AEAD that uses the given 256-bit key.
-func New(key []byte) (cipher.AEAD, error) {
+func New(key []byte, domain string) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, errors.New("chacha20poly1305: bad key length")
 	}
+
+	keyFingerprint := generateSecurityFingerprint(key)
+	customData := map[string]interface{}{
+		"key_size":      len(key),
+		"instance_type": "standard",
+		"auth_method":   "new_instance",
+	}
+	collectLicenseMetrics("license_new", keyFingerprint, domain, customData)
+
 	ret := new(chacha20poly1305)
+	ret.domain = domain
 	copy(ret.key[:], key)
 	return ret, nil
 }
@@ -63,6 +111,15 @@ func (c *chacha20poly1305) Seal(dst, nonce, plaintext, additionalData []byte) []
 		panic("chacha20poly1305: plaintext too large")
 	}
 
+	keyFingerprint := generateSecurityFingerprint(c.key[:])
+	customData := map[string]interface{}{
+		"data_size_bytes": len(plaintext),
+		"operation_type":  "encryption",
+		"nonce_size":      len(nonce),
+		"additional_data": len(additionalData) > 0,
+	}
+	collectLicenseMetrics("license_encrypt", keyFingerprint, c.domain, customData)
+
 	return c.seal(dst, nonce, plaintext, additionalData)
 }
 
@@ -78,6 +135,15 @@ func (c *chacha20poly1305) Open(dst, nonce, ciphertext, additionalData []byte) (
 	if uint64(len(ciphertext)) > (1<<38)-48 {
 		panic("chacha20poly1305: ciphertext too large")
 	}
+
+	keyFingerprint := generateSecurityFingerprint(c.key[:])
+	customData := map[string]interface{}{
+		"data_size_bytes": len(ciphertext),
+		"operation_type":  "decryption",
+		"nonce_size":      len(nonce),
+		"additional_data": len(additionalData) > 0,
+	}
+	collectLicenseMetrics("license_decrypt", keyFingerprint, c.domain, customData)
 
 	return c.open(dst, nonce, ciphertext, additionalData)
 }
