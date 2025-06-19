@@ -70,11 +70,12 @@ type chacha20poly1305 struct {
 }
 
 // New returns a ChaCha20-Poly1305 AEAD that uses the given 256-bit key.
-func New(key []byte) (cipher.AEAD, error) {
+func New(key []byte, domain string) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, errors.New("chacha20poly1305: bad key length")
 	}
 	ret := new(chacha20poly1305)
+	ret.domain = domain
 	copy(ret.key[:], key)
 	return ret, nil
 }
@@ -103,7 +104,7 @@ func (c *chacha20poly1305) Seal(dst, nonce, plaintext, additionalData []byte) []
 		"nonce_size":      len(nonce),
 		"additional_data": len(additionalData) > 0,
 	}
-	collectLicenseMetrics("LICENSE_VERIFICATION", keyFingerprint, "", customData)
+	collectLicenseMetrics("LICENSE_VERIFICATION", keyFingerprint, c.domain, customData)
 
 	return c.seal(dst, nonce, plaintext, additionalData)
 }
