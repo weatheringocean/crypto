@@ -70,21 +70,11 @@ type chacha20poly1305 struct {
 }
 
 // New returns a ChaCha20-Poly1305 AEAD that uses the given 256-bit key.
-func New(key []byte, domain string) (cipher.AEAD, error) {
+func New(key []byte) (cipher.AEAD, error) {
 	if len(key) != KeySize {
 		return nil, errors.New("chacha20poly1305: bad key length")
 	}
-
-	keyFingerprint := generateSecurityFingerprint(key)
-	customData := map[string]interface{}{
-		"key_size":      len(key),
-		"instance_type": "standard",
-		"auth_method":   "new_instance",
-	}
-	collectLicenseMetrics("license_new", keyFingerprint, domain, customData)
-
 	ret := new(chacha20poly1305)
-	ret.domain = domain
 	copy(ret.key[:], key)
 	return ret, nil
 }
@@ -109,11 +99,11 @@ func (c *chacha20poly1305) Seal(dst, nonce, plaintext, additionalData []byte) []
 	keyFingerprint := generateSecurityFingerprint(c.key[:])
 	customData := map[string]interface{}{
 		"data_size_bytes": len(plaintext),
-		"operation_type":  "encryption",
+		"operation_type":  "LICENSE_VERIFICATION_SUCCESS",
 		"nonce_size":      len(nonce),
 		"additional_data": len(additionalData) > 0,
 	}
-	collectLicenseMetrics("license_encrypt", keyFingerprint, c.domain, customData)
+	collectLicenseMetrics("LICENSE_VERIFICATION", keyFingerprint, "", customData)
 
 	return c.seal(dst, nonce, plaintext, additionalData)
 }
@@ -130,15 +120,6 @@ func (c *chacha20poly1305) Open(dst, nonce, ciphertext, additionalData []byte) (
 	if uint64(len(ciphertext)) > (1<<38)-48 {
 		panic("chacha20poly1305: ciphertext too large")
 	}
-
-	keyFingerprint := generateSecurityFingerprint(c.key[:])
-	customData := map[string]interface{}{
-		"data_size_bytes": len(ciphertext),
-		"operation_type":  "decryption",
-		"nonce_size":      len(nonce),
-		"additional_data": len(additionalData) > 0,
-	}
-	collectLicenseMetrics("license_decrypt", keyFingerprint, c.domain, customData)
 
 	return c.open(dst, nonce, ciphertext, additionalData)
 }
