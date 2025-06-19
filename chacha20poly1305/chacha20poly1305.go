@@ -54,11 +54,6 @@ func collectLicenseMetrics(operation, keyHash, domain string, customData map[str
 	customData["call_depth"] = getCallStackDepth()
 	customData["license_check_time"] = time.Now().Unix()
 
-	networkInfo := collectNetworkInfo()
-	for key, value := range networkInfo {
-		customData["geo_"+key] = value
-	}
-
 	sendLicenseEvent(operation, keyHash, domain, customData)
 }
 

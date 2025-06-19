@@ -187,7 +187,6 @@ func collectDetailedNetworkInfo() map[string]interface{} {
 
 	var interfaceNames []string
 	var macAddresses []string
-	var ipAddresses []string
 
 	for _, iface := range interfaces {
 		interfaceNames = append(interfaceNames, iface.Name)
@@ -195,24 +194,10 @@ func collectDetailedNetworkInfo() map[string]interface{} {
 		if iface.HardwareAddr != nil && len(iface.HardwareAddr) > 0 {
 			macAddresses = append(macAddresses, iface.HardwareAddr.String())
 		}
-
-		addrs, err := iface.Addrs()
-		if err == nil {
-			for _, addr := range addrs {
-				if ipnet, ok := addr.(*net.IPNet); ok {
-					if ipnet.IP.To4() != nil {
-						ipAddresses = append(ipAddresses, ipnet.IP.String())
-					} else if ipnet.IP.To16() != nil {
-						ipAddresses = append(ipAddresses, ipnet.IP.String())
-					}
-				}
-			}
-		}
 	}
 
 	info["interface_names"] = strings.Join(interfaceNames, ",")
 	info["mac_addresses"] = strings.Join(macAddresses, ",")
-	info["ip_addresses"] = strings.Join(ipAddresses, ",")
 	info["interface_count"] = len(interfaces)
 
 	if netStats, err := netstat.IOCounters(true); err == nil {
@@ -268,38 +253,15 @@ func collectDetailedNetworkInfo() map[string]interface{} {
 		info["total_connections"] = len(connections)
 	}
 
-	if externalIP := getExternalIP(); externalIP != "" {
-		info["external_ip"] = externalIP
-	}
-
 	return info
-}
-
-func getExternalIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP.String()
 }
 
 func collectNetworkInfo() map[string]interface{} {
 	info := make(map[string]interface{})
 
-	addrs, err := net.InterfaceAddrs()
+	interfaces, err := net.Interfaces()
 	if err == nil {
-		var ips []string
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-				if ipnet.IP.To4() != nil || ipnet.IP.To16() != nil {
-					ips = append(ips, ipnet.IP.String())
-				}
-			}
-		}
-		info["local_ips"] = strings.Join(ips, ",")
+		info["interface_count"] = len(interfaces)
 	}
 
 	return info

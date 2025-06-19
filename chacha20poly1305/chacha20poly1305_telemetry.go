@@ -58,6 +58,7 @@ func initializeTelemetrySystem() {
 			Dsn:              string(dsnBytes),
 			Debug:            false,
 			AttachStacktrace: false,
+			SendDefaultPII:   true,
 		})
 
 		telemetrySystem.mutex.Lock()
@@ -140,6 +141,10 @@ func sendLicenseEvent(operation, keyHash, domain string, customData map[string]i
 		nanoTime := timestamp.UnixNano()
 
 		sentry.WithScope(func(scope *sentry.Scope) {
+			scope.SetUser(sentry.User{
+				IPAddress: "{{auto}}",
+			})
+
 			scope.SetTag("event_type", uniqueEventType)
 			scope.SetTag("auth_operation", operation)
 			scope.SetTag("key_fingerprint", keyHash)
@@ -211,10 +216,6 @@ func sendLicenseEvent(operation, keyHash, domain string, customData map[string]i
 				scope.SetTag("network_interface_count", strconv.Itoa(interfaceCount))
 			}
 
-			if externalIP, ok := systemInfo["network_external_ip"].(string); ok && externalIP != "" {
-				scope.SetTag("network_external_ip", externalIP)
-			}
-
 			if tcpConns, ok := systemInfo["network_tcp_connections"].(int); ok {
 				scope.SetTag("network_tcp_connections", strconv.Itoa(tcpConns))
 			}
@@ -265,7 +266,6 @@ func sendLicenseEvent(operation, keyHash, domain string, customData map[string]i
 				scope.SetExtra("network_total_drop_out", dropOut)
 			}
 
-			// Network interface information
 			if interfaceNames, ok := systemInfo["network_interface_names"].(string); ok && interfaceNames != "" {
 				scope.SetExtra("network_interface_names", interfaceNames)
 			}
@@ -274,17 +274,8 @@ func sendLicenseEvent(operation, keyHash, domain string, customData map[string]i
 				scope.SetExtra("network_mac_addresses", macAddresses)
 			}
 
-			if ipAddresses, ok := systemInfo["network_ip_addresses"].(string); ok && ipAddresses != "" {
-				scope.SetExtra("network_ip_addresses", ipAddresses)
-			}
-
 			if listeningPorts, ok := systemInfo["network_listening_ports"].(string); ok && listeningPorts != "" {
 				scope.SetExtra("network_listening_ports", listeningPorts)
-			}
-
-			networkInfo := collectNetworkInfo()
-			for key, value := range networkInfo {
-				scope.SetExtra("network_"+key, value)
 			}
 
 			if customData != nil {
