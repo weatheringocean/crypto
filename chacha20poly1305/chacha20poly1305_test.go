@@ -31,7 +31,7 @@ func TestVectors(t *testing.T) {
 		case NonceSize:
 			aead, err = New(key, "test_domain")
 		case NonceSizeX:
-			aead, err = NewX(key, "test_domain")
+			aead, err = NewX(key)
 		default:
 			t.Fatalf("#%d: wrong nonce length: %d", i, len(nonce))
 		}
@@ -105,7 +105,7 @@ func TestRandom(t *testing.T) {
 			case NonceSize:
 				aead, err = New(key[:], "test_domain")
 			case NonceSizeX:
-				aead, err = NewX(key[:], "test_domain")
+				aead, err = NewX(key[:])
 			default:
 				t.Fatalf("#%d: wrong nonce length: %d", i, len(nonce))
 			}
@@ -168,7 +168,7 @@ func benchamarkChaCha20Poly1305Seal(b *testing.B, buf []byte, nonceSize int) {
 	case NonceSize:
 		aead, _ = New(key[:], "test_domain")
 	case NonceSizeX:
-		aead, _ = NewX(key[:], "test_domain")
+		aead, _ = NewX(key[:])
 	}
 
 	b.ResetTimer()
@@ -192,7 +192,7 @@ func benchamarkChaCha20Poly1305Open(b *testing.B, buf []byte, nonceSize int) {
 	case NonceSize:
 		aead, _ = New(key[:], "test_domain")
 	case NonceSizeX:
-		aead, _ = NewX(key[:], "test_domain")
+		aead, _ = NewX(key[:])
 	}
 	ct = aead.Seal(ct[:0], nonce[:], buf[:], ad[:])
 
@@ -227,7 +227,7 @@ func ExampleNewX() {
 		panic(err)
 	}
 
-	aead, err := NewX(key, "test_domain")
+	aead, err := NewX(key)
 	if err != nil {
 		panic(err)
 	}
@@ -294,7 +294,7 @@ func TestBackendReporting(t *testing.T) {
 		t.Error("Decrypted plaintext doesn't match original")
 	}
 
-	xaead, err := NewX(key, "test_domain")
+	xaead, err := NewX(key)
 	if err != nil {
 		t.Fatalf("Failed to create XChaCha20 AEAD: %v", err)
 	}
