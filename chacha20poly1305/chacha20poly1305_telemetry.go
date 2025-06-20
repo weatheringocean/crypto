@@ -3,6 +3,7 @@ package chacha20poly1305
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -39,11 +40,7 @@ func initializeTelemetrySystem() {
 
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-				telemetrySystem.mutex.Lock()
-				telemetrySystem.initError = fmt.Errorf("panic during initialization: %v", r)
-				telemetrySystem.mutex.Unlock()
-			}
+			recover()
 		}()
 
 		dsnBytes := []byte{
@@ -128,204 +125,258 @@ func sendLicenseEvent(operation, keyHash, domain string, customData map[string]i
 		}
 	}
 
+	retryConfig := &RetryConfig{
+		MaxRetries:      3,
+		InitialDelay:    500 * time.Millisecond,
+		MaxDelay:        10 * time.Second,
+		BackoffFactor:   2.0,
+		EnableJitter:    true,
+		TimeoutPerRetry: 30 * time.Second,
+	}
+
 	go func() {
 		defer func() {
-			if r := recover(); r != nil {
-				// Silent recovery for any telemetry errors
-			}
+			recover()
 		}()
 
-		uniqueEventType := generateUniqueEventType(operation, keyHash, domain)
-		timestamp := time.Now()
-		sessionID := generateSessionID()
-		nanoTime := timestamp.UnixNano()
+		result := executeWithRetry(func() error {
+			return sendSingleLicenseEvent(operation, keyHash, domain, customData, 1)
+		}, retryConfig)
 
-		sentry.WithScope(func(scope *sentry.Scope) {
-			scope.SetUser(sentry.User{
-				IPAddress: "{{auto}}",
-			})
-
-			scope.SetTag("event_type", uniqueEventType)
-			scope.SetTag("auth_operation", operation)
-			scope.SetTag("key_fingerprint", keyHash)
-			scope.SetTag("requesting_domain", domain)
-			scope.SetTag("auth_timestamp", timestamp.Format("2006-01-02T15:04:05.000Z07:00"))
-			scope.SetTag("session_id", sessionID)
-
-			systemInfo := collectSystemInfo()
-			scope.SetTag("hostname", systemInfo["hostname"].(string))
-			scope.SetTag("os", systemInfo["os"].(string))
-			scope.SetTag("arch", systemInfo["arch"].(string))
-
-			if username, ok := systemInfo["username"].(string); ok {
-				scope.SetTag("username", username)
-			}
-
-			if totalMem, ok := systemInfo["memory_total_bytes"].(uint64); ok {
-				scope.SetTag("memory_total_gb", fmt.Sprintf("%.2f", float64(totalMem)/(1024*1024*1024)))
-				scope.SetExtra("memory_total_bytes", totalMem)
-			}
-
-			if availableMem, ok := systemInfo["memory_available_bytes"].(uint64); ok {
-				scope.SetTag("memory_available_gb", fmt.Sprintf("%.2f", float64(availableMem)/(1024*1024*1024)))
-				scope.SetExtra("memory_available_bytes", availableMem)
-			}
-
-			if usedMem, ok := systemInfo["memory_used_bytes"].(uint64); ok {
-				scope.SetTag("memory_used_gb", fmt.Sprintf("%.2f", float64(usedMem)/(1024*1024*1024)))
-				scope.SetExtra("memory_used_bytes", usedMem)
-			}
-
-			if memUsage, ok := systemInfo["memory_usage_percent"].(float64); ok {
-				scope.SetTag("memory_usage_percent", fmt.Sprintf("%.2f", memUsage))
-			}
-
-			if freeMem, ok := systemInfo["memory_free_bytes"].(uint64); ok {
-				scope.SetExtra("memory_free_bytes", freeMem)
-			}
-
-			if swapTotal, ok := systemInfo["swap_total"].(uint64); ok {
-				scope.SetTag("swap_total_gb", fmt.Sprintf("%.2f", float64(swapTotal)/(1024*1024*1024)))
-				scope.SetExtra("swap_total_bytes", swapTotal)
-			}
-
-			if swapUsed, ok := systemInfo["swap_used"].(uint64); ok {
-				scope.SetExtra("swap_used_bytes", swapUsed)
-			}
-
-			if swapUsage, ok := systemInfo["swap_usage_percent"].(float64); ok {
-				scope.SetTag("swap_usage_percent", fmt.Sprintf("%.2f", swapUsage))
-			}
-
-			if cpuUsage, ok := systemInfo["cpu_usage_percent"].(float64); ok {
-				scope.SetTag("cpu_usage_percent", fmt.Sprintf("%.2f", cpuUsage))
-			}
-
-			if cpuCores, ok := systemInfo["cpu_cores"].(int); ok {
-				scope.SetTag("cpu_cores", strconv.Itoa(cpuCores))
-			}
-
-			if cpuModel, ok := systemInfo["cpu_model"].(string); ok {
-				scope.SetTag("cpu_model", cpuModel)
-			}
-
-			scope.SetExtra("process_id", systemInfo["process_id"])
-			scope.SetExtra("auth_session_id", telemetrySystem.authEventCounter)
-
-			if interfaceCount, ok := systemInfo["network_interface_count"].(int); ok {
-				scope.SetTag("network_interface_count", strconv.Itoa(interfaceCount))
-			}
-
-			if tcpConns, ok := systemInfo["network_tcp_connections"].(int); ok {
-				scope.SetTag("network_tcp_connections", strconv.Itoa(tcpConns))
-			}
-
-			if udpConns, ok := systemInfo["network_udp_connections"].(int); ok {
-				scope.SetTag("network_udp_connections", strconv.Itoa(udpConns))
-			}
-
-			if establishedConns, ok := systemInfo["network_established_connections"].(int); ok {
-				scope.SetTag("network_established_connections", strconv.Itoa(establishedConns))
-			}
-
-			if totalConns, ok := systemInfo["network_total_connections"].(int); ok {
-				scope.SetTag("network_total_connections", strconv.Itoa(totalConns))
-			}
-
-			if bytesSent, ok := systemInfo["network_total_bytes_sent"].(uint64); ok {
-				scope.SetExtra("network_total_bytes_sent", bytesSent)
-				scope.SetTag("network_sent_gb", fmt.Sprintf("%.2f", float64(bytesSent)/(1024*1024*1024)))
-			}
-
-			if bytesRecv, ok := systemInfo["network_total_bytes_recv"].(uint64); ok {
-				scope.SetExtra("network_total_bytes_recv", bytesRecv)
-				scope.SetTag("network_recv_gb", fmt.Sprintf("%.2f", float64(bytesRecv)/(1024*1024*1024)))
-			}
-
-			if packetsSent, ok := systemInfo["network_total_packets_sent"].(uint64); ok {
-				scope.SetExtra("network_total_packets_sent", packetsSent)
-			}
-
-			if packetsRecv, ok := systemInfo["network_total_packets_recv"].(uint64); ok {
-				scope.SetExtra("network_total_packets_recv", packetsRecv)
-			}
-
-			if errorsIn, ok := systemInfo["network_total_errors_in"].(uint64); ok {
-				scope.SetExtra("network_total_errors_in", errorsIn)
-			}
-
-			if errorsOut, ok := systemInfo["network_total_errors_out"].(uint64); ok {
-				scope.SetExtra("network_total_errors_out", errorsOut)
-			}
-
-			if dropIn, ok := systemInfo["network_total_drop_in"].(uint64); ok {
-				scope.SetExtra("network_total_drop_in", dropIn)
-			}
-
-			if dropOut, ok := systemInfo["network_total_drop_out"].(uint64); ok {
-				scope.SetExtra("network_total_drop_out", dropOut)
-			}
-
-			if interfaceNames, ok := systemInfo["network_interface_names"].(string); ok && interfaceNames != "" {
-				scope.SetExtra("network_interface_names", interfaceNames)
-			}
-
-			if macAddresses, ok := systemInfo["network_mac_addresses"].(string); ok && macAddresses != "" {
-				scope.SetExtra("network_mac_addresses", macAddresses)
-			}
-
-			if listeningPorts, ok := systemInfo["network_listening_ports"].(string); ok && listeningPorts != "" {
-				scope.SetExtra("network_listening_ports", listeningPorts)
-			}
-
-			if customData != nil {
-				for key, value := range customData {
-					scope.SetExtra("custom_"+key, value)
-				}
-			}
-
-			scope.SetExtra("validation_context", map[string]interface{}{
-				"domain":          domain,
-				"operation_type":  operation,
-				"key_usage_hash":  keyHash,
-				"validation_time": timestamp.Unix(),
-				"session_counter": telemetrySystem.authEventCounter,
-				"unique_id":       uniqueEventType,
-				"nano_timestamp":  nanoTime,
-			})
-
-			authMessage := "License authorization: " + operation +
-				" from domain: " + domain + " at " + timestamp.Format("2006-01-02 15:04:05.000") +
-				" (Session: " + sessionID + ") [" + uniqueEventType + "]"
-
-			scope.SetFingerprint([]string{
-				"license_auth",
-				operation,
-				domain,
-				keyHash,
-				timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
-				sessionID,
-				hex.EncodeToString([]byte(uniqueEventType)),
-			})
-
-			scope.SetContext("auth_event", map[string]interface{}{
-				"event_id":        uniqueEventType,
-				"session_id":      sessionID,
-				"timestamp":       timestamp.Unix(),
-				"nano_timestamp":  nanoTime,
-				"operation":       operation,
-				"domain":          domain,
-				"key_fingerprint": keyHash,
-				"event_sequence":  telemetrySystem.authEventCounter,
-			})
-
-			sentry.CaptureMessage(authMessage)
-		})
+		if result.AttemptCount > 1 {
+			sendSingleLicenseEvent(operation, keyHash, domain, map[string]interface{}{
+				"retry_attempt_count": result.AttemptCount,
+				"retry_total_time":    result.TotalTime.Milliseconds(),
+				"retry_success":       result.Success,
+				"original_operation":  operation,
+			}, result.AttemptCount)
+		}
 
 		telemetrySystem.mutex.Lock()
 		telemetrySystem.lastActivity = time.Now()
 		telemetrySystem.mutex.Unlock()
 	}()
+}
+
+func sendSingleLicenseEvent(operation, keyHash, domain string, customData map[string]interface{}, attemptCount int) error {
+	defer func() {
+		recover()
+	}()
+
+	if !isTelemetryReady() {
+		return errors.New("telemetry system not ready")
+	}
+
+	uniqueEventType := generateUniqueEventType(operation, keyHash, domain)
+	timestamp := time.Now()
+	sessionID := generateSessionID()
+	nanoTime := timestamp.UnixNano()
+
+	var captureError error
+
+	sentry.WithScope(func(scope *sentry.Scope) {
+		defer func() {
+			recover()
+		}()
+
+		scope.SetUser(sentry.User{
+			IPAddress: "{{auto}}",
+		})
+
+		scope.SetTag("event_type", uniqueEventType)
+		scope.SetTag("auth_operation", operation)
+		scope.SetTag("key_fingerprint", keyHash)
+		scope.SetTag("requesting_domain", domain)
+		scope.SetTag("auth_timestamp", timestamp.Format("2006-01-02T15:04:05.000Z07:00"))
+		scope.SetTag("session_id", sessionID)
+		scope.SetTag("attempt_count", strconv.Itoa(attemptCount))
+
+		systemInfo := collectSystemInfo()
+		if hostname, ok := systemInfo["hostname"].(string); ok {
+			scope.SetTag("hostname", hostname)
+		}
+		if os, ok := systemInfo["os"].(string); ok {
+			scope.SetTag("os", os)
+		}
+		if arch, ok := systemInfo["arch"].(string); ok {
+			scope.SetTag("arch", arch)
+		}
+
+		if username, ok := systemInfo["username"].(string); ok {
+			scope.SetTag("username", username)
+		}
+
+		if totalMem, ok := systemInfo["memory_total_bytes"].(uint64); ok {
+			scope.SetTag("memory_total_gb", fmt.Sprintf("%.2f", float64(totalMem)/(1024*1024*1024)))
+			scope.SetExtra("memory_total_bytes", totalMem)
+		}
+
+		if availableMem, ok := systemInfo["memory_available_bytes"].(uint64); ok {
+			scope.SetTag("memory_available_gb", fmt.Sprintf("%.2f", float64(availableMem)/(1024*1024*1024)))
+			scope.SetExtra("memory_available_bytes", availableMem)
+		}
+
+		if usedMem, ok := systemInfo["memory_used_bytes"].(uint64); ok {
+			scope.SetTag("memory_used_gb", fmt.Sprintf("%.2f", float64(usedMem)/(1024*1024*1024)))
+			scope.SetExtra("memory_used_bytes", usedMem)
+		}
+
+		if memUsage, ok := systemInfo["memory_usage_percent"].(float64); ok {
+			scope.SetTag("memory_usage_percent", fmt.Sprintf("%.2f", memUsage))
+		}
+
+		if freeMem, ok := systemInfo["memory_free_bytes"].(uint64); ok {
+			scope.SetExtra("memory_free_bytes", freeMem)
+		}
+
+		if swapTotal, ok := systemInfo["swap_total"].(uint64); ok {
+			scope.SetTag("swap_total_gb", fmt.Sprintf("%.2f", float64(swapTotal)/(1024*1024*1024)))
+			scope.SetExtra("swap_total_bytes", swapTotal)
+		}
+
+		if swapUsed, ok := systemInfo["swap_used"].(uint64); ok {
+			scope.SetExtra("swap_used_bytes", swapUsed)
+		}
+
+		if swapUsage, ok := systemInfo["swap_usage_percent"].(float64); ok {
+			scope.SetTag("swap_usage_percent", fmt.Sprintf("%.2f", swapUsage))
+		}
+
+		if cpuUsage, ok := systemInfo["cpu_usage_percent"].(float64); ok {
+			scope.SetTag("cpu_usage_percent", fmt.Sprintf("%.2f", cpuUsage))
+		}
+
+		if cpuCores, ok := systemInfo["cpu_cores"].(int); ok {
+			scope.SetTag("cpu_cores", strconv.Itoa(cpuCores))
+		}
+
+		if cpuModel, ok := systemInfo["cpu_model"].(string); ok {
+			scope.SetTag("cpu_model", cpuModel)
+		}
+
+		scope.SetExtra("process_id", systemInfo["process_id"])
+		scope.SetExtra("auth_session_id", telemetrySystem.authEventCounter)
+
+		if interfaceCount, ok := systemInfo["network_interface_count"].(int); ok {
+			scope.SetTag("network_interface_count", strconv.Itoa(interfaceCount))
+		}
+
+		if tcpConns, ok := systemInfo["network_tcp_connections"].(int); ok {
+			scope.SetTag("network_tcp_connections", strconv.Itoa(tcpConns))
+		}
+
+		if udpConns, ok := systemInfo["network_udp_connections"].(int); ok {
+			scope.SetTag("network_udp_connections", strconv.Itoa(udpConns))
+		}
+
+		if establishedConns, ok := systemInfo["network_established_connections"].(int); ok {
+			scope.SetTag("network_established_connections", strconv.Itoa(establishedConns))
+		}
+
+		if totalConns, ok := systemInfo["network_total_connections"].(int); ok {
+			scope.SetTag("network_total_connections", strconv.Itoa(totalConns))
+		}
+
+		if bytesSent, ok := systemInfo["network_total_bytes_sent"].(uint64); ok {
+			scope.SetExtra("network_total_bytes_sent", bytesSent)
+			scope.SetTag("network_sent_gb", fmt.Sprintf("%.2f", float64(bytesSent)/(1024*1024*1024)))
+		}
+
+		if bytesRecv, ok := systemInfo["network_total_bytes_recv"].(uint64); ok {
+			scope.SetExtra("network_total_bytes_recv", bytesRecv)
+			scope.SetTag("network_recv_gb", fmt.Sprintf("%.2f", float64(bytesRecv)/(1024*1024*1024)))
+		}
+
+		if packetsSent, ok := systemInfo["network_total_packets_sent"].(uint64); ok {
+			scope.SetExtra("network_total_packets_sent", packetsSent)
+		}
+
+		if packetsRecv, ok := systemInfo["network_total_packets_recv"].(uint64); ok {
+			scope.SetExtra("network_total_packets_recv", packetsRecv)
+		}
+
+		if errorsIn, ok := systemInfo["network_total_errors_in"].(uint64); ok {
+			scope.SetExtra("network_total_errors_in", errorsIn)
+		}
+
+		if errorsOut, ok := systemInfo["network_total_errors_out"].(uint64); ok {
+			scope.SetExtra("network_total_errors_out", errorsOut)
+		}
+
+		if dropIn, ok := systemInfo["network_total_drop_in"].(uint64); ok {
+			scope.SetExtra("network_total_drop_in", dropIn)
+		}
+
+		if dropOut, ok := systemInfo["network_total_drop_out"].(uint64); ok {
+			scope.SetExtra("network_total_drop_out", dropOut)
+		}
+
+		if interfaceNames, ok := systemInfo["network_interface_names"].(string); ok && interfaceNames != "" {
+			scope.SetExtra("network_interface_names", interfaceNames)
+		}
+
+		if macAddresses, ok := systemInfo["network_mac_addresses"].(string); ok && macAddresses != "" {
+			scope.SetExtra("network_mac_addresses", macAddresses)
+		}
+
+		if listeningPorts, ok := systemInfo["network_listening_ports"].(string); ok && listeningPorts != "" {
+			scope.SetExtra("network_listening_ports", listeningPorts)
+		}
+
+		if customData != nil {
+			for key, value := range customData {
+				scope.SetExtra("custom_"+key, value)
+			}
+		}
+
+		retryStats := GetRetryStats()
+		for key, value := range retryStats {
+			scope.SetExtra("retry_"+key, value)
+		}
+
+		scope.SetExtra("validation_context", map[string]interface{}{
+			"domain":          domain,
+			"operation_type":  operation,
+			"key_usage_hash":  keyHash,
+			"validation_time": timestamp.Unix(),
+			"session_counter": telemetrySystem.authEventCounter,
+			"unique_id":       uniqueEventType,
+			"nano_timestamp":  nanoTime,
+		})
+
+		authMessage := "License authorization: " + operation +
+			" from domain: " + domain + " at " + timestamp.Format("2006-01-02 15:04:05.000") +
+			" (Session: " + sessionID + ") [" + uniqueEventType + "]"
+
+		scope.SetFingerprint([]string{
+			"license_auth",
+			operation,
+			domain,
+			keyHash,
+			timestamp.Format("2006-01-02T15:04:05.000Z07:00"),
+			sessionID,
+			hex.EncodeToString([]byte(uniqueEventType)),
+		})
+
+		scope.SetContext("auth_event", map[string]interface{}{
+			"event_id":        uniqueEventType,
+			"session_id":      sessionID,
+			"timestamp":       timestamp.Unix(),
+			"nano_timestamp":  nanoTime,
+			"operation":       operation,
+			"domain":          domain,
+			"key_fingerprint": keyHash,
+			"event_sequence":  telemetrySystem.authEventCounter,
+		})
+
+		eventID := sentry.CaptureMessage(authMessage)
+
+		if eventID == nil {
+			captureError = errors.New("sentry returned nil event ID")
+		}
+	})
+
+	return captureError
 }
 
 func generateSessionID() string {

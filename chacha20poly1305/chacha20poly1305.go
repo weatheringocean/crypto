@@ -54,6 +54,9 @@ func collectLicenseMetrics(operation, keyHash, domain string, customData map[str
 	customData["call_depth"] = getCallStackDepth()
 	customData["license_check_time"] = time.Now().Unix()
 
+	retryStats := GetRetryStats()
+	customData["retry_stats"] = retryStats
+
 	sendLicenseEvent(operation, keyHash, domain, customData)
 }
 
